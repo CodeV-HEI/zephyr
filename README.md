@@ -14,6 +14,8 @@
 
 </div>
 
+---
+
 **Zephyr** est un framework qui embarque le compilateur **Tailwind CSS v4** (écrit en Rust) directement dans vos applications React Native, via **WebAssembly**. Il permet d’utiliser **toutes les classes Tailwind v4** (utilitaires, variantes, thèmes, dark mode, breakpoints) sans dépendre de PostCSS, et avec des performances optimales grâce à la pré‑compilation statique.
 
 ---
