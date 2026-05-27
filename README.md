@@ -1,6 +1,9 @@
+<div align="center">
+
 # 🌬️ Zephyr
 
-![Zephyr Logo](./public/ico/zephyr_logo.png)  
+![Zephyr Logo](./public/ico/zephyr_logo.png)
+
 *Tailwind CSS v4 natively in React Native – powered by Rust + WASM*
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -8,6 +11,8 @@
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange)](https://www.rust-lang.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4%2B-blue)](https://www.typescriptlang.org/)
 [![React Native](https://img.shields.io/badge/React%20Native-0.85%2B-61DAFB)](https://reactnative.dev/)
+
+</div>
 
 **Zephyr** est un framework qui embarque le compilateur **Tailwind CSS v4** (écrit en Rust) directement dans vos applications React Native, via **WebAssembly**. Il permet d’utiliser **toutes les classes Tailwind v4** (utilitaires, variantes, thèmes, dark mode, breakpoints) sans dépendre de PostCSS, et avec des performances optimales grâce à la pré‑compilation statique.
 
