@@ -199,46 +199,6 @@ La GitHub Action `lint.yml` (déjà présente) utilisera ces configurations.
 
 ---
 
-## 🧪 Prochaines étapes pour la version 1.0
-
-Voici ce qu’il reste à faire pour stabiliser Zephyr et le rendre prêt pour une première version publique :
-
-1. **Tester l’exemple complet**  
-   - Lancer `npx react-native run-android` (ou iOS) dans `examples/rnDemo` après avoir lié les packages.  
-   - Vérifier que le plugin Babel génère bien `zephyr-precompiled.json` et que les styles s’affichent correctement.
-
-2. **Améliorer le parsing CSS**  
-   - Actuellement, `parseCompiledCSS` ignore certaines règles et ne gère pas les sélecteurs complexes.  
-   - Implémenter un vrai parseur (ou utiliser une crate Rust comme `lightningcss` ou `cssparser`) pour extraire les déclarations avec leurs conditions (`@media`, `@supports`, pseudo‑classes).
-
-3. **Gérer les variantes (`hover:`, `dark:`, etc.)**  
-   - Convertir les conditions extraites en objets de style React Native avec les clés appropriées (ex: `:hover` n’existe pas en RN → il faudra utiliser `onPressIn`/`onPressOut` ou `Pressable`).  
-   - Pour le dark mode : utiliser `useColorScheme` et injecter le style conditionnellement.
-
-4. **Permettre la compilation à la volée (optionnelle)**  
-   - Dans le provider, si `precompiledStyles` n’est pas fourni, appeler `compileClasses` de manière asynchrone et mettre à jour le cache.  
-   - Attention aux performances : utiliser un `useEffect` qui déclenche une re‑rendu après résolution.
-
-5. **Publier les packages sur npm**  
-   - Créer un compte npm et publier `@zephyr/core`, `@zephyr/react-native`, `@zephyr/babel-plugin`.  
-   - Inclure les fichiers WASM dans le package (via `files` dans `package.json`).
-
-6. **Documenter l’API complète**  
-   - Props des composants stylisés.  
-   - Configuration du `ZephyrProvider` (`baseFontSize`, `precompiledStyles`).  
-   - Comment écrire des classes Tailwind personnalisées avec `@layer`.
-
-7. **Optimiser la taille du bundle**  
-   - Le fichier WASM fait ~1 Mo ; le minifier et le compresser.  
-   - Permettre de charger le WASM uniquement si nécessaire (ex: pendant le build seulement).
-
-8. **Intégrer des tests**  
-   - Tests unitaires pour `@zephyr/core` (Rust + TypeScript).  
-   - Tests d’intégration pour le plugin Babel.  
-   - Tests e2e pour l’exemple React Native.
-
----
-
 ## 🤝 Contribution
 
 Les contributions sont les bienvenues ! Merci de lire le fichier [CONTRIBUTING.md](CONTRIBUTING.md) (à créer) et de suivre le code de conduite.
