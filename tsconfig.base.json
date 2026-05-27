@@ -1,0 +1,33 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "jsx": "react-jsx",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true,
+        "baseUrl": ".",
+        "paths": {
+            "@zephyr/core": [
+                "packages/core/src/index.ts"
+            ],
+            "@zephyr/core/*": [
+                "packages/core/src/*"
+            ],
+            "@zephyr/react-native": [
+                "packages/react-native/src/index.ts"
+            ],
+            "@zephyr/react-native/*": [
+                "packages/react-native/src/*"
+            ]
+        }
+    },
+    "exclude": [
+        "node_modules",
+        "examples"
+    ]
+}

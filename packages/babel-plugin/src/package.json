@@ -1,0 +1,11 @@
+{
+    "name": "@zephyr/babel-plugin",
+    "version": "0.1.0",
+    "main": "src/index.js",
+    "peerDependencies": {
+        "@babel/core": "^7.0.0"
+    },
+    "dependencies": {
+        "@zephyr/core": "workspace:*"
+    }
+}
