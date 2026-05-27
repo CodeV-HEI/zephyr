@@ -35,7 +35,7 @@
 ### 2. Cloner le monorepo
 
 ```bash
-git clone https://github.com/your-org/zephyr.git
+git clone https://github.com/CodeV-HEI/zephyr.git
 cd zephyr
 pnpm install
 ```
