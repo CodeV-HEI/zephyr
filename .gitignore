@@ -127,7 +127,4 @@ next-env.d.ts
 #client
 client/
 *.txt
-*.js
-*.css
-*.html
 *.map
