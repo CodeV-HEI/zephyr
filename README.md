@@ -1,7 +1,5 @@
 <div align="center">
 
-# 🌬️ Zephyr
-
 ![Zephyr Logo](./public/ico/zephyr_logo.png)
 
 *Tailwind CSS v4 natively in React Native – powered by Rust + WASM*
