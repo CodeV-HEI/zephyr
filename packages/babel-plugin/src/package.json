@@ -6,6 +6,7 @@
         "@babel/core": "^7.0.0"
     },
     "dependencies": {
-        "@zephyr/core": "workspace:*"
+        "@tailwindcss/oxide": "^4.0.0",
+        "css-tree": "^2.3.1"
     }
 }
