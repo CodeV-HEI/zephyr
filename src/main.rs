@@ -2,16 +2,14 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use anyhow::{Context, Result};
-use argon2::{
-    password_hash::{rand_core::OsRng, SaltString},
-    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
-};
+use anyhow::{Context, Result, anyhow};
+use argon2::Argon2;
+use base64::Engine;  // <-- AJOUT
 use clap::{Parser, Subcommand};
 use rand::RngCore;
+use rand::rngs::OsRng;  // <-- AJOUT
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     fs,
     io::{self, Write},
     path::PathBuf,
@@ -34,9 +32,9 @@ struct Vault {
 // --- Données chiffrées sur disque ---
 #[derive(Debug, Serialize, Deserialize)]
 struct EncryptedVault {
-    salt: String,           // Sel Argon2 (base64)
-    nonce: String,          // Nonce AES (base64, 12 octets)
-    ciphertext: String,     // Données chiffrées (base64)
+    salt: String,
+    nonce: String,
+    ciphertext: String,
 }
 
 // --- CLI ---
@@ -50,105 +48,79 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Ajouter un nouveau mot de passe
     Add {
-        /// Nom du service (ex: GitHub)
         service: String,
-        /// Identifiant / email
         username: String,
-        /// Mot de passe (optionnel, sinon demandé interactivement)
         password: Option<String>,
     },
-    /// Rechercher des comptes (service ou identifiant)
     Search {
-        /// Chaîne à rechercher
         query: String,
     },
-    /// Lister tous les comptes (mots de passe masqués)
     List,
-    /// Supprimer une entrée (par index affiché dans list ou search)
     Remove {
-        /// Index de l'entrée (visible dans list/search)
         index: usize,
     },
 }
 
-// --- Constantes ---
 const VAULT_FILE: &str = "vault.enc";
-const AES_NONCE_SIZE: usize = 12; // GCM recommande 12 octets
+const AES_NONCE_SIZE: usize = 12;
 
-// -----------------------------------------------------------------------------
-// Dérivation de clé AES-256 à partir du mot de passe maître + sel
-// -----------------------------------------------------------------------------
 fn derive_key(master_password: &str, salt: &[u8]) -> Result<[u8; 32]> {
     let argon2 = Argon2::default();
     let mut key = [0u8; 32];
     argon2
         .hash_password_into(master_password.as_bytes(), salt, &mut key)
-        .context("Échec de la dérivation de clé Argon2")?;
+        .map_err(|e| anyhow!("Échec de la dérivation de clé Argon2: {}", e))?;
     Ok(key)
 }
 
-// -----------------------------------------------------------------------------
-// Chiffrement du vault avec AES-256-GCM
-// -----------------------------------------------------------------------------
 fn encrypt_vault(vault: &Vault, master_password: &str) -> Result<EncryptedVault> {
-    // 1. Sérialiser le vault en JSON
     let plaintext = serde_json::to_vec(vault).context("Sérialisation JSON")?;
 
-    // 2. Générer un sel aléatoire pour Argon2 (16 octets)
     let salt: [u8; 16] = rand::random();
     let key = derive_key(master_password, &salt)?;
 
-    // 3. Générer un nonce aléatoire (12 octets)
     let mut nonce_bytes = [0u8; AES_NONCE_SIZE];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    // 4. Chiffrer
-    let cipher = Aes256Gcm::new_from_slice(&key).context("Initialisation AES")?;
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| anyhow!("Initialisation AES: {}", e))?;
     let ciphertext = cipher
         .encrypt(nonce, plaintext.as_ref())
-        .map_err(|e| anyhow::anyhow!("Échec chiffrement : {:?}", e))?;
+        .map_err(|e| anyhow!("Échec chiffrement : {:?}", e))?;
 
+    let base64_engine = base64::engine::general_purpose::STANDARD;
     Ok(EncryptedVault {
-        salt: base64::encode(salt),
-        nonce: base64::encode(nonce_bytes),
-        ciphertext: base64::encode(ciphertext),
+        salt: base64_engine.encode(salt),
+        nonce: base64_engine.encode(nonce_bytes),
+        ciphertext: base64_engine.encode(ciphertext),
     })
 }
 
-// -----------------------------------------------------------------------------
-// Déchiffrement du vault
-// -----------------------------------------------------------------------------
 fn decrypt_vault(encrypted: &EncryptedVault, master_password: &str) -> Result<Vault> {
-    // 1. Décoder sel, nonce, ciphertext
-    let salt = base64::decode(&encrypted.salt).context("Sel invalide")?;
-    let nonce_bytes = base64::decode(&encrypted.nonce).context("Nonce invalide")?;
-    let ciphertext = base64::decode(&encrypted.ciphertext).context("Ciphertext invalide")?;
+    let base64_engine = base64::engine::general_purpose::STANDARD;
+
+    let salt = base64_engine.decode(&encrypted.salt).context("Sel invalide")?;
+    let nonce_bytes = base64_engine.decode(&encrypted.nonce).context("Nonce invalide")?;
+    let ciphertext = base64_engine.decode(&encrypted.ciphertext).context("Ciphertext invalide")?;
 
     if nonce_bytes.len() != AES_NONCE_SIZE {
         anyhow::bail!("Nonce doit faire 12 octets");
     }
 
-    // 2. Re-dériver la clé
     let key = derive_key(master_password, &salt)?;
-
-    // 3. Déchiffrer
-    let cipher = Aes256Gcm::new_from_slice(&key).context("Initialisation AES")?;
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| anyhow!("Initialisation AES: {}", e))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let plaintext = cipher
         .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|_| anyhow::anyhow!("Mot de passe maître incorrect ou données corrompues"))?;
+        .map_err(|_| anyhow!("Mot de passe maître incorrect ou données corrompues"))?;
 
-    // 4. Désérialiser
     let vault: Vault = serde_json::from_slice(&plaintext).context("JSON invalide")?;
     Ok(vault)
 }
 
-// -----------------------------------------------------------------------------
-// Lecture / écriture du fichier coffre
-// -----------------------------------------------------------------------------
 fn load_vault(master_password: &str) -> Result<Vault> {
     let path = PathBuf::from(VAULT_FILE);
     if !path.exists() {
@@ -166,9 +138,6 @@ fn save_vault(vault: &Vault, master_password: &str) -> Result<()> {
     Ok(())
 }
 
-// -----------------------------------------------------------------------------
-// Helpers d'affichage
-// -----------------------------------------------------------------------------
 fn print_entry(index: usize, entry: &VaultEntry, show_password: bool) {
     let pwd = if show_password {
         &entry.password
@@ -189,7 +158,7 @@ fn list_entries(vault: &Vault) {
     }
 }
 
-fn search_entries(vault: &Vault, query: &str) -> Vec<(usize, &VaultEntry)> {
+fn search_entries<'a>(vault: &'a Vault, query: &str) -> Vec<(usize, &'a VaultEntry)> {
     let q = query.to_lowercase();
     vault
         .entries
@@ -201,9 +170,6 @@ fn search_entries(vault: &Vault, query: &str) -> Vec<(usize, &VaultEntry)> {
         .collect()
 }
 
-// -----------------------------------------------------------------------------
-// Demande du mot de passe maître (avec confirmation à la première utilisation)
-// -----------------------------------------------------------------------------
 fn get_master_password(force_create: bool) -> Result<String> {
     let vault_exists = PathBuf::from(VAULT_FILE).exists();
     if !vault_exists || force_create {
@@ -218,18 +184,13 @@ fn get_master_password(force_create: bool) -> Result<String> {
         }
         return Ok(pwd);
     }
-
     let pwd = rpassword::prompt_password("Mot de passe maître: ")?;
     Ok(pwd)
 }
 
-// -----------------------------------------------------------------------------
-// Fonction principale
-// -----------------------------------------------------------------------------
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Déterminer si l'opération nécessite de forcer la création d'un nouveau vault
     let force_create = match &cli.command {
         Commands::Add { .. } | Commands::Search { .. } | Commands::List | Commands::Remove { .. } => false,
     };
