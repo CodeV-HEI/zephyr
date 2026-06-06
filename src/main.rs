@@ -4,32 +4,65 @@ use aes_gcm::{
 };
 use anyhow::{Context, Result, anyhow};
 use argon2::Argon2;
-use base64::Engine;  // <-- AJOUT
+use base64::Engine;
 use clap::{Parser, Subcommand};
-use rand::RngCore;
-use rand::rngs::OsRng;  // <-- AJOUT
+use rand::{Rng, RngCore, seq::SliceRandom};
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::{self, Write},
     path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-// --- Entrée du coffre ---
+// ------------------------------------------------------------
+// 1. Modèle de données
+// ------------------------------------------------------------
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct VaultEntry {
-    service: String,
-    username: String,
-    password: String,
+pub struct VaultEntry {
+    pub service: String,
+    pub username: String,
+    pub password: String,
+    pub created_at: u64,
+    pub updated_at: u64,
 }
 
-// --- Structure du coffre (non chiffrée en mémoire) ---
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct Vault {
-    entries: Vec<VaultEntry>,
+pub struct Vault {
+    pub entries: Vec<VaultEntry>,
 }
 
-// --- Données chiffrées sur disque ---
+// ------------------------------------------------------------
+// 2. Repository (pattern)
+// ------------------------------------------------------------
+const VAULT_FILE: &str = "vault.enc";
+const AES_NONCE_SIZE: usize = 12;
+
+pub struct VaultRepository;
+
+impl VaultRepository {
+    pub fn load(master_password: &str) -> Result<Vault> {
+        let path = PathBuf::from(VAULT_FILE);
+        if !path.exists() {
+            return Ok(Vault::default());
+        }
+        let data = fs::read_to_string(&path).context("Lecture fichier vault.enc")?;
+        let encrypted: EncryptedVault = serde_json::from_str(&data).context("Format invalide")?;
+        decrypt_vault(&encrypted, master_password)
+    }
+
+    pub fn save(vault: &Vault, master_password: &str) -> Result<()> {
+        let encrypted = encrypt_vault(vault, master_password)?;
+        let json = serde_json::to_string_pretty(&encrypted)?;
+        fs::write(VAULT_FILE, json).context("Écriture vault.enc")?;
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------
+// 3. Chiffrement (Factory simple)
+// ------------------------------------------------------------
 #[derive(Debug, Serialize, Deserialize)]
 struct EncryptedVault {
     salt: String,
@@ -37,46 +70,17 @@ struct EncryptedVault {
     ciphertext: String,
 }
 
-// --- CLI ---
-#[derive(Parser)]
-#[command(name = "Zephyr Vault")]
-#[command(about = "Coffre-fort local avec chiffrement AES", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    Add {
-        service: String,
-        username: String,
-        password: Option<String>,
-    },
-    Search {
-        query: String,
-    },
-    List,
-    Remove {
-        index: usize,
-    },
-}
-
-const VAULT_FILE: &str = "vault.enc";
-const AES_NONCE_SIZE: usize = 12;
-
 fn derive_key(master_password: &str, salt: &[u8]) -> Result<[u8; 32]> {
     let argon2 = Argon2::default();
     let mut key = [0u8; 32];
     argon2
         .hash_password_into(master_password.as_bytes(), salt, &mut key)
-        .map_err(|e| anyhow!("Échec de la dérivation de clé Argon2: {}", e))?;
+        .map_err(|e| anyhow!("Dérivation clé échouée: {}", e))?;
     Ok(key)
 }
 
 fn encrypt_vault(vault: &Vault, master_password: &str) -> Result<EncryptedVault> {
     let plaintext = serde_json::to_vec(vault).context("Sérialisation JSON")?;
-
     let salt: [u8; 16] = rand::random();
     let key = derive_key(master_password, &salt)?;
 
@@ -88,22 +92,21 @@ fn encrypt_vault(vault: &Vault, master_password: &str) -> Result<EncryptedVault>
         .map_err(|e| anyhow!("Initialisation AES: {}", e))?;
     let ciphertext = cipher
         .encrypt(nonce, plaintext.as_ref())
-        .map_err(|e| anyhow!("Échec chiffrement : {:?}", e))?;
+        .map_err(|e| anyhow!("Échec chiffrement: {:?}", e))?;
 
-    let base64_engine = base64::engine::general_purpose::STANDARD;
+    let engine = base64::engine::general_purpose::STANDARD;
     Ok(EncryptedVault {
-        salt: base64_engine.encode(salt),
-        nonce: base64_engine.encode(nonce_bytes),
-        ciphertext: base64_engine.encode(ciphertext),
+        salt: engine.encode(salt),
+        nonce: engine.encode(nonce_bytes),
+        ciphertext: engine.encode(ciphertext),
     })
 }
 
 fn decrypt_vault(encrypted: &EncryptedVault, master_password: &str) -> Result<Vault> {
-    let base64_engine = base64::engine::general_purpose::STANDARD;
-
-    let salt = base64_engine.decode(&encrypted.salt).context("Sel invalide")?;
-    let nonce_bytes = base64_engine.decode(&encrypted.nonce).context("Nonce invalide")?;
-    let ciphertext = base64_engine.decode(&encrypted.ciphertext).context("Ciphertext invalide")?;
+    let engine = base64::engine::general_purpose::STANDARD;
+    let salt = engine.decode(&encrypted.salt).context("Sel invalide")?;
+    let nonce_bytes = engine.decode(&encrypted.nonce).context("Nonce invalide")?;
+    let ciphertext = engine.decode(&encrypted.ciphertext).context("Ciphertext invalide")?;
 
     if nonce_bytes.len() != AES_NONCE_SIZE {
         anyhow::bail!("Nonce doit faire 12 octets");
@@ -121,21 +124,84 @@ fn decrypt_vault(encrypted: &EncryptedVault, master_password: &str) -> Result<Va
     Ok(vault)
 }
 
-fn load_vault(master_password: &str) -> Result<Vault> {
-    let path = PathBuf::from(VAULT_FILE);
-    if !path.exists() {
-        return Ok(Vault::default());
-    }
-    let data = fs::read_to_string(&path).context("Lecture fichier vault.enc")?;
-    let encrypted: EncryptedVault = serde_json::from_str(&data).context("Format vault.enc invalide")?;
-    decrypt_vault(&encrypted, master_password)
+// ------------------------------------------------------------
+// 4. Commandes CLI enrichies
+// ------------------------------------------------------------
+#[derive(Parser)]
+#[command(name = "Zephyr Vault")]
+#[command(about = "Coffre-fort local chiffré avec ASCII art", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 }
 
-fn save_vault(vault: &Vault, master_password: &str) -> Result<()> {
-    let encrypted = encrypt_vault(vault, master_password)?;
-    let json = serde_json::to_string_pretty(&encrypted)?;
-    fs::write(VAULT_FILE, json).context("Écriture du fichier vault.enc")?;
-    Ok(())
+#[derive(Subcommand)]
+enum Commands {
+    /// Ajouter un nouveau compte (service, identifiant)
+    Add {
+        service: String,
+        username: String,
+        /// Mot de passe (optionnel, sinon demande interactive ou génération)
+        password: Option<String>,
+        /// Générer automatiquement un mot de passe fort
+        #[arg(long)]
+        generate: bool,
+        /// Longueur du mot de passe généré (défaut 16)
+        #[arg(long, default_value = "16")]
+        length: usize,
+        /// Inclure des symboles dans le mot de passe généré
+        #[arg(long)]
+        symbols: bool,
+    },
+    /// Lister tous les comptes (mots de passe masqués)
+    List {
+        /// Afficher les mots de passe en clair (dangereux)
+        #[arg(long)]
+        show: bool,
+    },
+    /// Rechercher un compte (service ou identifiant)
+    Search {
+        query: String,
+        /// Afficher le mot de passe en clair
+        #[arg(long)]
+        show: bool,
+    },
+    /// Supprimer un compte par index
+    Remove { index: usize },
+    /// Générer un mot de passe fort (sans l'enregistrer)
+    Generate {
+        #[arg(long, default_value = "16")]
+        length: usize,
+        #[arg(long)]
+        symbols: bool,
+    },
+    /// Exporter toutes les données (déchiffrées) vers un fichier CSV
+    Export { filename: String },
+    /// Importer depuis un fichier CSV (format: service,username,password)
+    Import { filename: String },
+    /// Afficher la bannière ASCII
+    Banner,
+}
+
+// ------------------------------------------------------------
+// 5. Helpers (génération, affichage, etc.)
+// ------------------------------------------------------------
+fn generate_password(length: usize, use_symbols: bool) -> String {
+    const LETTERS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    const DIGITS: &[u8] = b"0123456789";
+    const SYMBOLS: &[u8] = b"!@#$%^&*()-_=+[]{}|;:,.<>?";
+
+    let mut charset = Vec::new();
+    charset.extend_from_slice(LETTERS);
+    charset.extend_from_slice(DIGITS);
+    if use_symbols {
+        charset.extend_from_slice(SYMBOLS);
+    }
+
+    let mut rng = rand::thread_rng();
+    (0..length)
+        .map(|_| *charset.choose(&mut rng).unwrap() as char)
+        .collect()
 }
 
 fn print_entry(index: usize, entry: &VaultEntry, show_password: bool) {
@@ -150,11 +216,15 @@ fn print_entry(index: usize, entry: &VaultEntry, show_password: bool) {
     );
 }
 
-fn list_entries(vault: &Vault) {
+fn list_entries(vault: &Vault, show_passwords: bool) {
+    if vault.entries.is_empty() {
+        println!("📭 Coffre vide.");
+        return;
+    }
     println!("Index | Service              | Username             | Password");
     println!("------+----------------------+----------------------+------------------");
     for (i, entry) in vault.entries.iter().enumerate() {
-        print_entry(i, entry, false);
+        print_entry(i, entry, show_passwords);
     }
 }
 
@@ -170,7 +240,34 @@ fn search_entries<'a>(vault: &'a Vault, query: &str) -> Vec<(usize, &'a VaultEnt
         .collect()
 }
 
+// ------------------------------------------------------------
+// 6. ASCII Banner
+// ------------------------------------------------------------
+fn print_banner() {
+    let banner = r#"
+    ███████╗███████╗██████╗ ██╗  ██╗██╗   ██╗██████╗ 
+    ╚══███╔╝██╔════╝██╔══██╗██║  ██║╚██╗ ██╔╝██╔══██╗
+      ███╔╝ █████╗  ██████╔╝███████║ ╚████╔╝ ██████╔╝
+     ███╔╝  ██╔══╝  ██╔══██╗██╔══██║  ╚██╔╝  ██╔══██╗
+    ███████╗███████╗██║  ██║██║  ██║   ██║   ██║  ██║
+    ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝
+                     ZEPHYR VAULT
+              Coffre-fort local chiffré
+    "#;
+    println!("{}", banner);
+}
+
+// ------------------------------------------------------------
+// 7. Master password (avec cache simple pour la session)
+// ------------------------------------------------------------
+static mut MASTER_PASSWORD_CACHE: Option<String> = None;
+
 fn get_master_password(force_create: bool) -> Result<String> {
+    unsafe {
+        if let Some(pwd) = &MASTER_PASSWORD_CACHE {
+            return Ok(pwd.clone());
+        }
+    }
     let vault_exists = PathBuf::from(VAULT_FILE).exists();
     if !vault_exists || force_create {
         println!("🔐 Création d'un nouveau coffre");
@@ -182,45 +279,137 @@ fn get_master_password(force_create: bool) -> Result<String> {
         if pwd.is_empty() {
             anyhow::bail!("Le mot de passe ne peut pas être vide");
         }
+        unsafe {
+            MASTER_PASSWORD_CACHE = Some(pwd.clone());
+        }
         return Ok(pwd);
     }
     let pwd = rpassword::prompt_password("Mot de passe maître: ")?;
+    unsafe {
+        MASTER_PASSWORD_CACHE = Some(pwd.clone());
+    }
     Ok(pwd)
 }
 
+// ------------------------------------------------------------
+// 8. Export / Import CSV
+// ------------------------------------------------------------
+fn export_csv(vault: &Vault, filename: &str) -> Result<()> {
+    let mut wtr = csv::Writer::from_path(filename)?;
+    wtr.write_record(&["service", "username", "password"])?;
+    for entry in &vault.entries {
+        wtr.write_record(&[&entry.service, &entry.username, &entry.password])?;
+    }
+    wtr.flush()?;
+    println!("✅ Exporté vers {}", filename);
+    Ok(())
+}
+
+fn import_csv(filename: &str, vault: &mut Vault) -> Result<()> {
+    let mut rdr = csv::Reader::from_path(filename)?;
+    for result in rdr.records() {
+        let record = result?;
+        if record.len() >= 3 {
+            let entry = VaultEntry {
+                service: record[0].to_string(),
+                username: record[1].to_string(),
+                password: record[2].to_string(),
+                created_at: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                updated_at: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            };
+            vault.entries.push(entry);
+        }
+    }
+    println!("✅ Import terminé.");
+    Ok(())
+}
+
+// ------------------------------------------------------------
+// 9. Main
+// ------------------------------------------------------------
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let force_create = match &cli.command {
-        Commands::Add { .. } | Commands::Search { .. } | Commands::List | Commands::Remove { .. } => false,
-    };
-
-    let master_pwd = get_master_password(force_create)?;
-    let mut vault = load_vault(&master_pwd)?;
+    // Afficher la bannière pour toute commande sauf "banner" (évite double)
+    if !matches!(cli.command, Commands::Banner) {
+        print_banner();
+    }
 
     match cli.command {
-        Commands::Add { service, username, password } => {
-            let pwd = match password {
-                Some(p) => p,
-                None => {
-                    print!("Mot de passe (non affiché) : ");
-                    io::stdout().flush()?;
-                    rpassword::read_password()?
-                }
+        Commands::Banner => {
+            print_banner();
+            return Ok(());
+        }
+        Commands::Generate { length, symbols } => {
+            let pwd = generate_password(length, symbols);
+            println!("{}", pwd);
+            return Ok(());
+        }
+        Commands::Export { filename } => {
+            let master_pwd = get_master_password(false)?;
+            let vault = VaultRepository::load(&master_pwd)?;
+            export_csv(&vault, &filename)?;
+            return Ok(());
+        }
+        Commands::Import { filename } => {
+            let master_pwd = get_master_password(false)?;
+            let mut vault = VaultRepository::load(&master_pwd)?;
+            import_csv(&filename, &mut vault)?;
+            VaultRepository::save(&vault, &master_pwd)?;
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    let master_pwd = get_master_password(false)?;
+    let mut vault = VaultRepository::load(&master_pwd)?;
+
+    match cli.command {
+        Commands::Add {
+            service,
+            username,
+            password,
+            generate,
+            length,
+            symbols,
+        } => {
+            let final_password = if generate {
+                generate_password(length, symbols)
+            } else if let Some(p) = password {
+                p
+            } else {
+                print!("Mot de passe (non affiché) : ");
+                io::stdout().flush()?;
+                rpassword::read_password()?
             };
-            if pwd.is_empty() {
+            if final_password.is_empty() {
                 anyhow::bail!("Le mot de passe ne peut pas être vide");
             }
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
             let entry = VaultEntry {
                 service,
                 username,
-                password: pwd,
+                password: final_password,
+                created_at: now,
+                updated_at: now,
             };
             vault.entries.push(entry);
-            save_vault(&vault, &master_pwd)?;
+            VaultRepository::save(&vault, &master_pwd)?;
             println!("✅ Compte ajouté avec succès !");
         }
-        Commands::Search { query } => {
+        Commands::List { show } => {
+            list_entries(&vault, show);
+        }
+        Commands::Search { query, show } => {
             let results = search_entries(&vault, &query);
             if results.is_empty() {
                 println!("Aucun résultat pour '{}'", query);
@@ -228,17 +417,8 @@ fn main() -> Result<()> {
                 println!("Index | Service              | Username             | Password");
                 println!("------+----------------------+----------------------+------------------");
                 for (idx, entry) in results {
-                    print_entry(idx, entry, false);
+                    print_entry(idx, entry, show);
                 }
-                println!("\nPour voir le mot de passe d'une entrée, utilisez `list` et l'index.");
-            }
-        }
-        Commands::List => {
-            if vault.entries.is_empty() {
-                println!("📭 Le coffre est vide.");
-            } else {
-                list_entries(&vault);
-                println!("\n💡 Pour supprimer : `zephyr_vault remove <index>`");
             }
         }
         Commands::Remove { index } => {
@@ -246,12 +426,10 @@ fn main() -> Result<()> {
                 anyhow::bail!("Index invalide. Utilisez `list` pour voir les indices.");
             }
             let removed = vault.entries.remove(index);
-            save_vault(&vault, &master_pwd)?;
-            println!(
-                "🗑️  Supprimé : {} ({})",
-                removed.service, removed.username
-            );
+            VaultRepository::save(&vault, &master_pwd)?;
+            println!("🗑️  Supprimé : {} ({})", removed.service, removed.username);
         }
+        _ => unreachable!(),
     }
 
     Ok(())
