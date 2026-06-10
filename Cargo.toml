@@ -1,6 +1,6 @@
 [package]
 name = "zephyr_vault"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -14,3 +14,5 @@ anyhow = "1.0"
 rpassword = "7.3"
 base64 = "0.22"         # Encodage des données binaires
 csv="1.3"
+colored = "2.1"
+arboard = "3.4"
