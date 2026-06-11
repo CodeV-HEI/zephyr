@@ -14,13 +14,16 @@ use utils::print_banner;
 struct Cli {
     #[command(subcommand)]
     command: commands::Commands,
+    /// Ne pas afficher la bannière
+    #[arg(long, global = true)]
+    quiet: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // Affiche la bannière sauf pour la commande Banner (qui l'affiche elle-même)
-    if !matches!(cli.command, commands::Commands::Banner) {
+    // Affiche la bannière sauf si --quiet ou si la commande est Banner
+    if !cli.quiet && !matches!(cli.command, commands::Commands::Banner) {
         print_banner();
     }
 
