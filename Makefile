@@ -7,7 +7,7 @@ clippy:
 	cargo clippy --all-targets --all-features -- -D warnings
 
 audit:
-	cargo audit --no-yanked-check
+	cargo audit --no-yanked
 
 test:
 	cargo test --verbose
