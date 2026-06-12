@@ -1,7 +1,6 @@
 use anyhow::{Result, bail};
-use rand::seq::SliceRandom;
 use colored::*;
-use rpassword;
+use rand::seq::SliceRandom;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 

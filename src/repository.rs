@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
 
+use crate::crypto::{EncryptedVault, decrypt_vault, encrypt_vault};
 use crate::vault::Vault;
-use crate::crypto::{encrypt_vault, decrypt_vault, EncryptedVault};
 
 pub const VAULT_FILE: &str = "vault.enc";
 

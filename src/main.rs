@@ -1,8 +1,8 @@
-mod vault;
+mod commands;
 mod crypto;
 mod repository;
-mod commands;
 mod utils;
+mod vault;
 
 use clap::Parser;
 use commands::handle_command;

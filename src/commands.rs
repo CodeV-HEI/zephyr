@@ -1,14 +1,14 @@
 use anyhow::{Result, bail};
 use clap::Subcommand;
-use std::io::{self, Write};
 use colored::*;
+use std::io::{self, Write};
 
-use crate::vault::{Vault, VaultEntry};
 use crate::repository::VaultRepository;
 use crate::utils::{
-    get_master_password, generate_password, list_entries, search_entries, print_entry,
-    compute_column_widths,
+    compute_column_widths, generate_password, get_master_password, list_entries, print_entry,
+    search_entries,
 };
+use crate::vault::{Vault, VaultEntry};
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -91,7 +91,10 @@ pub fn handle_command(cmd: Commands) -> Result<()> {
         }
         Commands::Wipe { force } => {
             if !force {
-                println!("{}", "⚠️  Utilisez --force pour supprimer définitivement le coffre.".yellow());
+                println!(
+                    "{}",
+                    "⚠️  Utilisez --force pour supprimer définitivement le coffre.".yellow()
+                );
                 return Ok(());
             }
             std::fs::remove_file(crate::repository::VAULT_FILE)?;
@@ -116,7 +119,11 @@ pub fn handle_command(cmd: Commands) -> Result<()> {
                 Some(e) => {
                     let mut clipboard = arboard::Clipboard::new()?;
                     clipboard.set_text(e.password.clone())?;
-                    println!("{} '{}'", "📋 Mot de passe copié pour".green(), e.service.cyan());
+                    println!(
+                        "{} '{}'",
+                        "📋 Mot de passe copié pour".green(),
+                        e.service.cyan()
+                    );
                 }
                 None => {
                     bail!("{}", "Aucun compte unique trouvé.".red());
@@ -184,11 +191,19 @@ pub fn handle_command(cmd: Commands) -> Result<()> {
                 }
                 Commands::Remove { index } => {
                     if index >= vault.entries.len() {
-                        bail!("{}", "Index invalide. Utilisez `list` pour voir les indices.".red());
+                        bail!(
+                            "{}",
+                            "Index invalide. Utilisez `list` pour voir les indices.".red()
+                        );
                     }
                     let removed = vault.entries.remove(index);
                     VaultRepository::save(&vault, &master_pwd)?;
-                    println!("{} {} ({})", "🗑️ Supprimé :".red(), removed.service, removed.username);
+                    println!(
+                        "{} {} ({})",
+                        "🗑️ Supprimé :".red(),
+                        removed.service,
+                        removed.username
+                    );
                 }
                 _ => unreachable!(),
             }
@@ -199,9 +214,9 @@ pub fn handle_command(cmd: Commands) -> Result<()> {
 
 fn export_csv(vault: &Vault, filename: &str) -> Result<()> {
     let mut wtr = csv::Writer::from_path(filename)?;
-    wtr.write_record(&["service", "username", "password"])?;
+    wtr.write_record(["service", "username", "password"])?;
     for entry in &vault.entries {
-        wtr.write_record(&[&entry.service, &entry.username, &entry.password])?;
+        wtr.write_record([&entry.service, &entry.username, &entry.password])?;
     }
     wtr.flush()?;
     println!("{} {}", "✅ Exporté vers".green(), filename);
