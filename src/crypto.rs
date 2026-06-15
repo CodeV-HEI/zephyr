@@ -1,6 +1,6 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
 };
 use anyhow::{Context, Result, anyhow};
 use argon2::Argon2;
@@ -38,8 +38,8 @@ pub fn encrypt_vault(vault: &Vault, master_password: &str) -> Result<EncryptedVa
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| anyhow!("Initialisation AES: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| anyhow!("Initialisation AES: {}", e))?;
     let ciphertext = cipher
         .encrypt(nonce, plaintext.as_ref())
         .map_err(|e| anyhow!("Échec chiffrement: {:?}", e))?;
@@ -56,15 +56,17 @@ pub fn decrypt_vault(encrypted: &EncryptedVault, master_password: &str) -> Resul
     let engine = base64::engine::general_purpose::STANDARD;
     let salt = engine.decode(&encrypted.salt).context("Sel invalide")?;
     let nonce_bytes = engine.decode(&encrypted.nonce).context("Nonce invalide")?;
-    let ciphertext = engine.decode(&encrypted.ciphertext).context("Ciphertext invalide")?;
+    let ciphertext = engine
+        .decode(&encrypted.ciphertext)
+        .context("Ciphertext invalide")?;
 
     if nonce_bytes.len() != AES_NONCE_SIZE {
         anyhow::bail!("Nonce doit faire 12 octets");
     }
 
     let key = derive_key(master_password, &salt)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| anyhow!("Initialisation AES: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| anyhow!("Initialisation AES: {}", e))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let plaintext = cipher
         .decrypt(nonce, ciphertext.as_ref())
